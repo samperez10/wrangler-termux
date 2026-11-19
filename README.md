@@ -47,6 +47,19 @@ Cloudflare supports two authentication modes. Do not mix them.
 
 ### OAuth login
 
+The recommended form on Termux is the device-code flow:
+
+```sh
+wrangler-login
+```
+
+It prints a URL and a short code, then waits five minutes for approval. There
+is no localhost callback server, so you can approve from any browser, on the
+same phone or another device, and you can switch Cloudflare accounts without
+racing a timeout.
+
+The browser callback flow also works:
+
 ```sh
 wrangler login
 ```
@@ -55,20 +68,27 @@ The `wrangler` launcher automatically unsets `CLOUDFLARE_API_TOKEN` when the
 subcommand is `login`, so this works even if you normally keep an API token in
 your environment.
 
-You can also use:
-
-```sh
-wrangler-login
-```
-
-If the browser does not open on Termux:
-
 ```sh
 wrangler login --browser false
 ```
 
-Open the printed URL in a browser on the same device. The callback listens on
-localhost, so the browser and Termux must be on the same phone.
+opens nothing and prints the URL; open it on the same phone. The callback
+server listens on `localhost:8976` and **shuts down after two minutes**, so
+complete the consent quickly. If you take longer — for example while switching
+accounts — the redirect fails with "this site can't be reached". In that case
+use `wrangler-login` (device flow) or an API token.
+
+`wrangler logout` only removes the local credential; it does not sign you out
+of the Cloudflare website. To authorize a different account, either use the
+account picker on the consent page, use a private browsing window, or sign out
+at <https://dash.cloudflare.com> first. In the device flow, approve the code
+while signed in to the account you want.
+
+Use `--callback-port` to move the callback if `8976` is busy:
+
+```sh
+wrangler login --browser false --callback-port 8988
+```
 
 ### API token
 

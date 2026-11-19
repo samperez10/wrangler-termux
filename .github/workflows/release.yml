@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: true
+      rebuild:
+        description: 'Rebuild and replace assets for an existing release'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -40,13 +45,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_VERSION: ${{ inputs.version }}
           REQUESTED_PUBLISH: ${{ inputs.publish }}
+          REQUESTED_REBUILD: ${{ inputs.rebuild }}
         run: |
           set -euo pipefail
           requested="${REQUESTED_VERSION:-latest}"
           publish="${REQUESTED_PUBLISH:-true}"
+          rebuild="${REQUESTED_REBUILD:-false}"
           if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
             requested=latest
             publish=true
+            rebuild=false
           fi
 
           if [[ "$requested" == "latest" ]]; then
@@ -61,7 +69,7 @@ jobs:
           fi
 
           build_needed=true
-          if [[ "$publish" == "true" ]] && gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if [[ "$rebuild" != "true" ]] && [[ "$publish" == "true" ]] && gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release v$version already exists; nothing to package."
             build_needed=false
           fi
@@ -71,7 +79,7 @@ jobs:
             echo "publish=$publish"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
-          echo "Resolved Wrangler $version (publish=$publish, build=$build_needed)"
+          echo "Resolved Wrangler $version (publish=$publish, build=$build_needed, rebuild=$rebuild)"
 
   package:
     name: Prepare installer
@@ -135,6 +143,7 @@ jobs:
         printf '%s\n' "$version_output" | grep -F "$EXPECTED_VERSION" >/dev/null
         wrangler --help >/dev/null
         test -x "$PREFIX/bin/wrangler-login"
+        CLOUDFLARE_API_TOKEN=dummy wrangler login --help | grep -q -- '--device'
         CLOUDFLARE_API_TOKEN=dummy wrangler login --help >/dev/null
         sh -n "$PREFIX/bin/wrangler"
         sh -n "$PREFIX/bin/wrangler-login"

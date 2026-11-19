@@ -132,16 +132,18 @@ chmod 755 "$LAUNCHER"
 LOGIN="$BIN/wrangler-login"
 cat > "$LOGIN" <<EOF
 #!/data/data/com.termux/files/usr/bin/sh
+# Device-code login: no localhost callback server, so it also works when
+# switching accounts or approving from another device.
 set -eu
 unset CLOUDFLARE_API_TOKEN
-exec "$LAUNCHER" login "\$@"
+exec "$LAUNCHER" login --device --browser false "\$@"
 EOF
 chmod 755 "$LOGIN"
 
 "$LAUNCHER" --version >/dev/null || fail "wrangler did not start after installation"
 
 say "Installed: $("$LAUNCHER" --version)"
-say "OAuth login: wrangler login (or wrangler-login)"
+say "OAuth login: wrangler-login (device code) or wrangler login (browser callback)"
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
     say "Note: CLOUDFLARE_API_TOKEN is set; 'wrangler login' and 'wrangler-login' unset it automatically."
 fi
