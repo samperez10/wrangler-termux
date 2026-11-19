@@ -30,13 +30,42 @@ if ! command -v node >/dev/null 2>&1; then
     say "Installing Node.js..."
     pkg install -y nodejs || fail "could not install Node.js"
 fi
+command -v node >/dev/null 2>&1 || fail "node is not available after installation"
+NODE_BIN="$(command -v node)"
+
 # Recent Termux nodejs packages list npm as an optional dependency instead of
-# bundling it, so install it separately when the command is missing.
+# bundling it, so install it separately when the command is missing. If the
+# Termux package cannot be installed (for example a corrupted mirror package),
+# fall back to the official npm tarball from the npm registry.
+install_npm_from_registry() {
+    tmp="$(mktemp -d "${TMPDIR:-$PREFIX/tmp}/wrangler-npm.XXXXXX")"
+    url="$(curl -fsSL --retry 3 https://registry.npmjs.org/npm/latest |
+        "$NODE_BIN" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(JSON.parse(s).dist.tarball)})')"
+    [ -n "$url" ] || return 1
+    curl -fsSL --retry 3 "$url" -o "$tmp/npm.tgz" || return 1
+    mkdir -p "$PREFIX/lib/node_modules/npm"
+    rm -rf "${PREFIX:?}/lib/node_modules/npm"/*
+    tar -xzf "$tmp/npm.tgz" -C "$PREFIX/lib/node_modules/npm" --strip-components=1 || return 1
+    rm -rf "$tmp"
+
+    cat > "$PREFIX/bin/npm" <<EOF
+#!/data/data/com.termux/files/usr/bin/sh
+exec "$NODE_BIN" "$PREFIX/lib/node_modules/npm/bin/npm-cli.js" "\$@"
+EOF
+    cat > "$PREFIX/bin/npx" <<EOF
+#!/data/data/com.termux/files/usr/bin/sh
+exec "$NODE_BIN" "$PREFIX/lib/node_modules/npm/bin/npx-cli.js" "\$@"
+EOF
+    chmod 755 "$PREFIX/bin/npm" "$PREFIX/bin/npx"
+}
+
 if ! command -v npm >/dev/null 2>&1; then
     say "Installing npm..."
-    pkg install -y npm || fail "could not install npm"
+    if ! pkg install -y npm; then
+        say "Termux npm package failed; installing npm from the npm registry..."
+        install_npm_from_registry || fail "could not install npm"
+    fi
 fi
-command -v node >/dev/null 2>&1 || fail "node is not available after installation"
 command -v npm >/dev/null 2>&1 || fail "npm is not available after installation"
 
 if [ -z "$VERSION" ]; then

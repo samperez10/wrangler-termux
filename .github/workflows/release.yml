@@ -113,7 +113,6 @@ jobs:
         coreutils
         curl
         nodejs
-        npm
         tar
       copy-paths: |
         artifact
