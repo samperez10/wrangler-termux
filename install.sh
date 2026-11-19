@@ -122,7 +122,14 @@ rm -f "$LAUNCHER"
 cat > "$LAUNCHER" <<EOF
 #!/data/data/com.termux/files/usr/bin/sh
 set -eu
+# A CLOUDFLARE_API_TOKEN exported for other tools (for example Claude Code)
+# would silently override the OAuth login. Ignore it unless the user opts in.
 if [ "\${1:-}" = "login" ]; then
+    unset CLOUDFLARE_API_TOKEN
+elif [ -n "\${WRANGLER_CLOUDFLARE_API_TOKEN:-}" ]; then
+    CLOUDFLARE_API_TOKEN="\$WRANGLER_CLOUDFLARE_API_TOKEN"
+    export CLOUDFLARE_API_TOKEN
+elif [ "\${WRANGLER_TERMUX_USE_API_TOKEN:-0}" != "1" ]; then
     unset CLOUDFLARE_API_TOKEN
 fi
 exec "$NODE_BIN" "$WRANGLER_JS" "\$@"
@@ -145,6 +152,7 @@ chmod 755 "$LOGIN"
 say "Installed: $("$LAUNCHER" --version)"
 say "OAuth login: wrangler-login (device code) or wrangler login (browser callback)"
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
-    say "Note: CLOUDFLARE_API_TOKEN is set; 'wrangler login' and 'wrangler-login' unset it automatically."
+    say "Note: CLOUDFLARE_API_TOKEN is set but ignored by wrangler by default."
+    say "      Use WRANGLER_TERMUX_USE_API_TOKEN=1 to use it, or WRANGLER_CLOUDFLARE_API_TOKEN for a wrangler-only token."
 fi
 say "wrangler dev is not supported on Termux; deploy/secret/whoami/tail work."

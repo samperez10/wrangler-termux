@@ -92,20 +92,24 @@ wrangler login --browser false --callback-port 8988
 
 ### API token
 
+The Termux launcher **ignores `CLOUDFLARE_API_TOKEN` by default**, because
+other tools on the phone (Claude Code, for example) often export it. That
+prevents a token for one account from silently overriding your OAuth login.
+
+Opt in for a single command:
+
 ```sh
-export CLOUDFLARE_API_TOKEN='...'
+WRANGLER_TERMUX_USE_API_TOKEN=1 wrangler whoami
+```
+
+Or keep a Wrangler-only token that does not affect other tools:
+
+```sh
+export WRANGLER_CLOUDFLARE_API_TOKEN='...'
 wrangler whoami
 ```
 
-In API-token mode, do **not** run `wrangler login`; Wrangler will correctly
-report:
-
-```text
-You are logged in with an API Token. Unset CLOUDFLARE_API_TOKEN to log in via OAuth.
-```
-
-That is not an error in this setup. The `wrangler-login` helper exists for the
-case where you want OAuth instead.
+`wrangler login` and `wrangler-login` always ignore tokens.
 
 A token needs the **Workers Scripts: Edit** permission; the "Edit Cloudflare
 Workers" template includes it. A read-only token can still run `wrangler
@@ -118,17 +122,18 @@ No access to the specified resource.
 
 ### Which credential wins
 
-Wrangler prefers `CLOUDFLARE_API_TOKEN` whenever it is set, even after a
-successful OAuth login. If you switch to OAuth, unset the variable (and remove
-it from `~/.bashrc` or `~/.profile`) or Wrangler will keep using the token:
+| Situation | Credential used |
+| --- | --- |
+| `WRANGLER_CLOUDFLARE_API_TOKEN` set | that token |
+| `WRANGLER_TERMUX_USE_API_TOKEN=1` | exported `CLOUDFLARE_API_TOKEN` |
+| otherwise | OAuth login (`wrangler-login`) |
 
-```sh
-unset CLOUDFLARE_API_TOKEN
-wrangler whoami
-```
+This is why `wrangler whoami` can show a different email than the one you just
+authorized: check `env | grep CLOUDFLARE` and use `wrangler-login` again, or
+opt in to the token deliberately.
 
-> `npx wrangler login` bypasses the Termux launcher and does not unset the
-> token. Use `wrangler login` or `wrangler-login`.
+> `npx wrangler login` bypasses the Termux launcher, so it still sees an
+> exported `CLOUDFLARE_API_TOKEN`. Use `wrangler login` or `wrangler-login`.
 
 Avoid `npx wrangler@4` or `npx --yes wrangler`: those download a fresh,
 unpatched copy and fail on the missing Android `workerd` binary. Plain

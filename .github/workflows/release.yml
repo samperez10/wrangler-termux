@@ -147,6 +147,7 @@ jobs:
         CLOUDFLARE_API_TOKEN=dummy wrangler login --help >/dev/null
         sh -n "$PREFIX/bin/wrangler"
         sh -n "$PREFIX/bin/wrangler-login"
+        grep -q WRANGLER_TERMUX_USE_API_TOKEN "$PREFIX/bin/wrangler"
         work="$(mktemp -d)"
         printf 'export default { async fetch() { return new Response("ok"); } };\n' > "$work/worker.js"
         printf 'name = "smoke"\nmain = "worker.js"\ncompatibility_date = "2026-11-01"\n' > "$work/wrangler.toml"
