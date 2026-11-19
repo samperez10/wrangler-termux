@@ -1,0 +1,169 @@
+name: Package Wrangler for Termux
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Wrangler version, or latest'
+        required: false
+        default: 'latest'
+      publish:
+        description: 'Publish a release after validation'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wrangler-termux-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve latest Wrangler
+    runs-on: ubuntu-24.04
+    outputs:
+      build_needed: ${{ steps.release.outputs.build_needed }}
+      publish: ${{ steps.release.outputs.publish }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Resolve npm version
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          requested="${REQUESTED_VERSION:-latest}"
+          publish="${REQUESTED_PUBLISH:-true}"
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
+            requested=latest
+            publish=true
+          fi
+
+          if [[ "$requested" == "latest" ]]; then
+            version="$(curl -fsSL --retry 3 https://registry.npmjs.org/wrangler/latest | jq -r '.version')"
+          else
+            version="${requested#v}"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Refusing invalid Wrangler version: $version" >&2
+            exit 1
+          fi
+
+          build_needed=true
+          if [[ "$publish" == "true" ]] && gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$version already exists; nothing to package."
+            build_needed=false
+          fi
+
+          {
+            echo "build_needed=$build_needed"
+            echo "publish=$publish"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved Wrangler $version (publish=$publish, build=$build_needed)"
+
+  package:
+    name: Prepare installer
+    needs: prepare
+    if: needs.prepare.outputs.build_needed == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble release files
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp install.sh dist/install.sh
+          jq -n --arg version "$VERSION" \
+            '{version:$version,package:"wrangler",source:"npm",target:"termux"}' \
+            > dist/release.json
+          sh -n dist/install.sh
+          cat dist/release.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wrangler-termux-${{ needs.prepare.outputs.version }}
+          if-no-files-found: error
+          path: dist/
+
+  termux-smoke:
+    name: Smoke test in Termux ARM64
+    needs: [prepare, package]
+    if: needs.prepare.outputs.build_needed == 'true'
+    permissions:
+      actions: read
+      contents: read
+    uses: wallentx/gh-actions/.github/workflows/termux-run.yml@ff9661b38a67bf048e3cd195095f1609e03b6a08
+    with:
+      packages: |
+        ca-certificates
+        coreutils
+        curl
+        nodejs
+        tar
+      copy-paths: |
+        artifact
+      env: |
+        EXPECTED_VERSION=${{ needs.prepare.outputs.version }}
+        ARTIFACT_NAME=wrangler-termux-${{ needs.prepare.outputs.version }}
+      host-commands: |
+        set -Eeuo pipefail
+        mkdir -p artifact
+        gh run download "$GITHUB_RUN_ID" \
+          --repo "$GITHUB_REPOSITORY" \
+          --name "$ARTIFACT_NAME" \
+          --dir artifact
+      commands: |
+        set -Eeuo pipefail
+        cd artifact
+        WRANGLER_TERMUX_VERSION="$EXPECTED_VERSION" sh install.sh
+        version_output="$(wrangler --version)"
+        printf '%s\n' "$version_output"
+        printf '%s\n' "$version_output" | grep -F "$EXPECTED_VERSION" >/dev/null
+        wrangler --help >/dev/null
+        test -x "$PREFIX/bin/wrangler-login"
+        CLOUDFLARE_API_TOKEN=dummy wrangler login --help >/dev/null
+        sh -n "$PREFIX/bin/wrangler"
+        sh -n "$PREFIX/bin/wrangler-login"
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish verified release
+    needs: [prepare, package, termux-smoke]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download installer
+        uses: actions/download-artifact@v4
+        with:
+          name: wrangler-termux-${{ needs.prepare.outputs.version }}
+          path: dist
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: Wrangler ${{ needs.prepare.outputs.version }} for Termux
+          notes: |
+            Wrangler ${{ needs.prepare.outputs.version }} packaged for Termux.
+
+            Includes the Android `workerd` workaround and a Termux-safe `wrangler` launcher.
+            `wrangler dev` is not supported; deploy/secret/whoami/tail work.
+          files: |
+            dist/install.sh
+            dist/release.json
+          make_latest: true
+          generate_release_notes: true

@@ -1,0 +1,113 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# Wrangler for Termux/Android.
+#
+# Installs the official Wrangler npm package, patches the local workerd
+# bootstrap (there is no Android workerd binary), and replaces the broken
+# npm shebang shim with a Termux-safe launcher.
+set -eu
+
+REPOSITORY="${WRANGLER_TERMUX_REPO:-samperez10/wrangler-termux}"
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+VERSION="${WRANGLER_TERMUX_VERSION:-}"
+
+fail() { printf 'wrangler-termux: %s\n' "$*" >&2; exit 1; }
+say()  { printf '%s\n' "$*"; }
+
+case "$PREFIX" in
+    /data/data/com.termux/files/usr) ;;
+    *) fail "run this installer inside Termux (PREFIX=$PREFIX)" ;;
+esac
+[ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "x86_64" ] || \
+    fail "only Termux aarch64/x86_64 is supported"
+command -v pkg >/dev/null 2>&1 || fail "Termux package manager not found"
+
+if ! command -v curl >/dev/null 2>&1; then
+    say "Installing curl..."
+    pkg install -y curl || fail "could not install curl"
+fi
+
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    say "Installing Node.js and npm..."
+    pkg install -y nodejs || fail "could not install Node.js"
+fi
+command -v node >/dev/null 2>&1 || fail "node is not available after installation"
+command -v npm >/dev/null 2>&1 || fail "npm is not available after installation"
+
+if [ -z "$VERSION" ]; then
+    release_json="$(curl -fsSL --connect-timeout 5 --max-time 10 \
+        "https://github.com/$REPOSITORY/releases/latest/download/release.json" \
+        2>/dev/null || true)"
+    VERSION="$(printf '%s' "$release_json" |
+        sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+        head -n 1)"
+fi
+if [ -z "$VERSION" ]; then
+    VERSION="$(npm view wrangler version 2>/dev/null || true)"
+fi
+printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$' || \
+    fail "could not resolve a valid Wrangler version"
+
+say "Installing Wrangler $VERSION for Termux..."
+npm install -g "wrangler@$VERSION" --ignore-scripts --no-audit --no-fund || \
+    fail "npm install failed"
+
+ROOT="$(npm root -g)"
+MAIN="$(find "$ROOT" -path '*/workerd/lib/main.js' -type f -print -quit)"
+[ -n "$MAIN" ] || fail "workerd/lib/main.js was not found under $ROOT"
+
+MAIN="$MAIN" node <<'NODE'
+const fs = require("fs");
+const path = process.env.MAIN;
+const source = fs.readFileSync(path, "utf8");
+const oldLine = "var { binPath } = generateBinPath();";
+const newLine = "/* termux-patch: no workerd binary for Android; only `wrangler dev` uses it */ var binPath; try { binPath = generateBinPath().binPath; } catch { binPath = \"/dev/null\"; }";
+if (source.includes("termux-patch")) {
+    console.log("workerd is already patched");
+    process.exit(0);
+}
+if (!source.includes(oldLine)) {
+    console.error("wrangler-termux: workerd bootstrap changed; patch pattern is missing");
+    process.exit(1);
+}
+fs.writeFileSync(path, source.replace(oldLine, newLine));
+console.log("patched workerd bootstrap");
+NODE
+
+WRANGLER_JS="$ROOT/wrangler/bin/wrangler.js"
+[ -f "$WRANGLER_JS" ] || fail "wrangler entry point is missing: $WRANGLER_JS"
+
+NODE_BIN="$(command -v node)"
+BIN="$PREFIX/bin"
+mkdir -p "$BIN"
+
+# npm creates a symlink to a script with `#!/usr/bin/env node`; Termux has no
+# /usr/bin/env. Replace it with a launcher that invokes the Termux node directly.
+LAUNCHER="$BIN/wrangler"
+rm -f "$LAUNCHER"
+cat > "$LAUNCHER" <<EOF
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+if [ "\${1:-}" = "login" ]; then
+    unset CLOUDFLARE_API_TOKEN
+fi
+exec "$NODE_BIN" "$WRANGLER_JS" "\$@"
+EOF
+chmod 755 "$LAUNCHER"
+
+LOGIN="$BIN/wrangler-login"
+cat > "$LOGIN" <<EOF
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+unset CLOUDFLARE_API_TOKEN
+exec "$LAUNCHER" login "\$@"
+EOF
+chmod 755 "$LOGIN"
+
+"$LAUNCHER" --version >/dev/null || fail "wrangler did not start after installation"
+
+say "Installed: $("$LAUNCHER" --version)"
+say "OAuth login: wrangler login (or wrangler-login)"
+if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+    say "Note: CLOUDFLARE_API_TOKEN is set; 'wrangler login' and 'wrangler-login' unset it automatically."
+fi
+say "wrangler dev is not supported on Termux; deploy/secret/whoami/tail work."
