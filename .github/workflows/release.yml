@@ -138,13 +138,19 @@ jobs:
         CLOUDFLARE_API_TOKEN=dummy wrangler login --help >/dev/null
         sh -n "$PREFIX/bin/wrangler"
         sh -n "$PREFIX/bin/wrangler-login"
+        work="$(mktemp -d)"
+        printf 'export default { async fetch() { return new Response("ok"); } };\n' > "$work/worker.js"
+        printf 'name = "smoke"\nmain = "worker.js"\ncompatibility_date = "2026-11-01"\n' > "$work/wrangler.toml"
+        (cd "$work" && wrangler deploy --dry-run --outdir dist)
+        test -s "$work/dist/worker.js"
+        rm -rf "$work"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   publish:
     name: Publish verified release
     needs: [prepare, package, termux-smoke]
-    if: needs.prepare.outputs.publish == 'true'
+    if: needs.prepare.outputs.publish == 'true' && needs.prepare.outputs.build_needed == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Download installer

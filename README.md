@@ -87,8 +87,32 @@ You are logged in with an API Token. Unset CLOUDFLARE_API_TOKEN to log in via OA
 That is not an error in this setup. The `wrangler-login` helper exists for the
 case where you want OAuth instead.
 
+A token needs the **Workers Scripts: Edit** permission; the "Edit Cloudflare
+Workers" template includes it. A read-only token can still run `wrangler
+whoami`, but `wrangler deploy` then fails with:
+
+```text
+A request to the Cloudflare API (.../deployments) failed.
+No access to the specified resource.
+```
+
+### Which credential wins
+
+Wrangler prefers `CLOUDFLARE_API_TOKEN` whenever it is set, even after a
+successful OAuth login. If you switch to OAuth, unset the variable (and remove
+it from `~/.bashrc` or `~/.profile`) or Wrangler will keep using the token:
+
+```sh
+unset CLOUDFLARE_API_TOKEN
+wrangler whoami
+```
+
 > `npx wrangler login` bypasses the Termux launcher and does not unset the
 > token. Use `wrangler login` or `wrangler-login`.
+
+Avoid `npx wrangler@4` or `npx --yes wrangler`: those download a fresh,
+unpatched copy and fail on the missing Android `workerd` binary. Plain
+`wrangler` and `npx wrangler` use the installed Termux launcher.
 
 ## Updates
 
