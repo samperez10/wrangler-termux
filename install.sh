@@ -26,9 +26,15 @@ if ! command -v curl >/dev/null 2>&1; then
     pkg install -y curl || fail "could not install curl"
 fi
 
-if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-    say "Installing Node.js and npm..."
+if ! command -v node >/dev/null 2>&1; then
+    say "Installing Node.js..."
     pkg install -y nodejs || fail "could not install Node.js"
+fi
+# Recent Termux nodejs packages list npm as an optional dependency instead of
+# bundling it, so install it separately when the command is missing.
+if ! command -v npm >/dev/null 2>&1; then
+    say "Installing npm..."
+    pkg install -y npm || fail "could not install npm"
 fi
 command -v node >/dev/null 2>&1 || fail "node is not available after installation"
 command -v npm >/dev/null 2>&1 || fail "npm is not available after installation"
